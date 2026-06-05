@@ -179,6 +179,13 @@
     opacity: 0.7;
   }
 
+  .edge-inherited {
+    stroke: #ffe600;
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+    opacity: 0.85;
+  }
+
   /* House labels */
   .house-label {
     fill: rgba(255,255,255,0.15);
@@ -238,7 +245,11 @@
     Active target
   </div>
   <div class="legend-item">
-    <div class="legend-line" style="background:var(--unknown);background:repeating-linear-gradient(90deg,var(--unknown) 0,var(--unknown) 6px,transparent 6px,transparent 10px)"></div>
+    <div class="legend-line" style="background:repeating-linear-gradient(90deg,#ffe600 0,#ffe600 6px,transparent 6px,transparent 10px)"></div>
+    Inherited target
+  </div>
+  <div class="legend-item">
+    <div class="legend-line" style="background:repeating-linear-gradient(90deg,var(--unknown) 0,var(--unknown) 6px,transparent 6px,transparent 10px)"></div>
     Unknown target (inherited)
   </div>
 </div>
@@ -255,7 +266,7 @@
 const players = {
   Charlie: { house: 1, eliminated: true },
   Amber:   { house: 1, eliminated: true },
-  Fariz:   { house: 2, eliminated: false },
+  Fariz:   { house: 2, eliminated: true },
   Astley:  { house: 2, eliminated: false },
   Kate:    { house: 2, eliminated: false },
   Rachel:  { house: 2, eliminated: false },
@@ -272,8 +283,8 @@ const players = {
 const edges = [
   // confirmed target edges (active, not eliminations)
   { from: 'Rachel', to: 'SamT',  type: 'active' },
-  { from: 'SamT',   to: 'Fariz', type: 'active' },
-  { from: 'Fariz',  to: 'Holly', type: 'active' },
+  { from: 'SamT',   to: 'Fariz', type: 'eliminated' },
+  { from: 'Fariz',  to: 'Holly', type: 'inherited' },
   { from: 'Astley', to: 'Ben',   type: 'active' },
   { from: 'Kate',   to: 'SamR',  type: 'active' },
   { from: 'Josh',   to: 'Kate',  type: 'active' },
@@ -287,31 +298,31 @@ const edges = [
 
 // ─── Layout: manual positions in a 1100×700 canvas ──────────────────────────
 
-const W = 1100, H = 720;
+const W = 1100, H = 820;
 const NODE_W = 100, NODE_H = 36;
 
 const pos = {
-  // House 1 (top-left)
-  Charlie: { x: 90,  y: 130 },
-  Amber:   { x: 90,  y: 200 },
+  // House 1 (bottom-left, eliminated)
+  Charlie: { x: 60,  y: 560 },
+  Amber:   { x: 60,  y: 650 },
   // House 2 (top-center)
   Rachel:  { x: 310, y: 90  },
-  Fariz:   { x: 450, y: 90  },
+  Fariz:   { x: 490, y: 160 },
   Astley:  { x: 310, y: 170 },
-  Kate:    { x: 450, y: 170 },
-  // House 3 (center-right)
-  SamT:    { x: 620, y: 90  },
+  Kate:    { x: 490, y: 240 },
+  // House 3 (top-right)
+  SamT:    { x: 680, y: 90  },
   // House 4 (right)
-  SamR:    { x: 790, y: 170 },
+  SamR:    { x: 850, y: 200 },
   // House 5 (bottom-right)
-  Holly:   { x: 790, y: 440 },
-  Josh:    { x: 620, y: 360 },
-  SamH:    { x: 790, y: 360 },
-  // House 6 (bottom-left)
-  Ben:     { x: 220, y: 400 },
-  Brad:    { x: 90,  y: 340 },
+  Holly:   { x: 850, y: 460 },
+  Josh:    { x: 680, y: 380 },
+  SamH:    { x: 850, y: 380 },
+  // House 6 (mid-left)
+  Ben:     { x: 240, y: 420 },
+  Brad:    { x: 60,  y: 310 },
   // House 7 (far right)
-  Jarrod:  { x: 960, y: 260 },
+  Jarrod:  { x: 1000, y: 280 },
 };
 
 // House grouping boxes
@@ -359,6 +370,7 @@ function makeArrow(id, color) {
 makeArrow('arrow-eliminated', '#ff3b3b');
 makeArrow('arrow-active', '#00e5ff');
 makeArrow('arrow-unknown', '#ffa500');
+makeArrow('arrow-inherited', '#ffe600');
 
 // Background grid
 el('rect', { width: W, height: H, fill: '#0a0a0f' });
@@ -398,34 +410,21 @@ function edgeEndpoints(fromKey, toKey) {
   const oy = (NODE_H / 2 + 4) * uy;
   return {
     x1: f.x + ox, y1: f.y + oy,
-    x2: t.x - ox * 1.5, y2: t.y - oy * 1.5,
+    x2: t.x - ox, y2: t.y - oy,
   };
 }
 
-// Unknown target ghost nodes
-const unknownTargets = {
-  Brad: { x: 90,  y: 470 },
-  Ben:  { x: 220, y: 530 },
-};
+  // No unknown target ghost nodes
 
 for (const edge of edges) {
-  if (edge.type === 'unknown') {
-    const p = unknownTargets[edge.from];
-    const fc = nodeCenter(edge.from);
-    // dashed line to question box
-    el('line', {
-      x1: fc.x, y1: fc.y + NODE_H / 2 + 2,
-      x2: p.x + NODE_W / 2, y2: p.y,
-      class: 'edge-unknown',
-      'marker-end': 'url(#arrow-unknown)',
-    });
-    continue;
-  }
+  if (edge.type === 'unknown') continue;
   if (!edge.to) continue;
   const ep = edgeEndpoints(edge.from, edge.to);
-  const cls = edge.type === 'eliminated' ? 'edge-eliminated' : 'edge-active';
-  const arrow = edge.type === 'eliminated' ? 'url(#arrow-eliminated)' : 'url(#arrow-active)';
-  el('line', { ...ep, class: cls, 'marker-end': arrow });
+  const cls = edge.type === 'eliminated' ? 'edge-eliminated' : edge.type === 'inherited' ? 'edge-inherited' : 'edge-active';
+  const arrow = edge.type === 'eliminated' ? 'url(#arrow-eliminated)' : edge.type === 'inherited' ? 'url(#arrow-inherited)' : 'url(#arrow-active)';
+  const stroke = edge.type === 'eliminated' ? '#ff3b3b' : edge.type === 'inherited' ? '#ffe600' : '#00e5ff';
+  const dash = edge.type === 'inherited' ? '6 4' : 'none';
+  el('line', { ...ep, class: cls, 'marker-end': arrow, stroke, 'stroke-width': 2.5, 'stroke-dasharray': dash });
 }
 
 // ─── Nodes ───────────────────────────────────────────────────────────────────
@@ -485,37 +484,7 @@ for (const [key, data] of Object.entries(players)) {
   svg.appendChild(g);
 }
 
-// ─── Unknown target ghost nodes ───────────────────────────────────────────────
-
-for (const [owner, p] of Object.entries(unknownTargets)) {
-  const g = el('g', { class: 'node-group' });
-
-  el('rect', {
-    x: p.x, y: p.y,
-    width: NODE_W, height: NODE_H,
-    fill: 'rgba(255,165,0,0.07)',
-    stroke: '#ffa500',
-    'stroke-width': 1.5,
-    'stroke-dasharray': '5 3',
-    rx: 6, ry: 6,
-  }, g);
-
-  el('text', {
-    x: p.x + NODE_W / 2,
-    y: p.y + NODE_H / 2 - 5,
-    fill: '#ffa500',
-    style: 'font-family:Share Tech Mono,monospace;font-size:13px;dominant-baseline:middle;text-anchor:middle;',
-  }, g).textContent = '???';
-
-  el('text', {
-    x: p.x + NODE_W / 2,
-    y: p.y + NODE_H / 2 + 8,
-    fill: 'rgba(255,165,0,0.6)',
-    style: 'font-family:Share Tech Mono,monospace;font-size:8px;dominant-baseline:middle;text-anchor:middle;letter-spacing:0.08em;',
-  }, g).textContent = `${owner.toUpperCase()}'S HEIR`;
-
-  svg.appendChild(g);
-}
+// No unknown ghost nodes to render
 
 // ─── Jarrod: no known connections — orphan note ──────────────────────────────
 
@@ -544,6 +513,7 @@ function edgeMid(fromKey, toKey, dy = -10) {
 const chainLabels = [
   { from: 'Brad', to: 'Charlie', text: 'ELIMINATED', color: '#ff3b3b' },
   { from: 'Ben',  to: 'Amber',  text: 'ELIMINATED', color: '#ff3b3b' },
+  { from: 'SamT', to: 'Fariz',  text: 'ELIMINATED', color: '#ff3b3b' },
 ];
 for (const lbl of chainLabels) {
   const m = edgeMid(lbl.from, lbl.to, -10);
