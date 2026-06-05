@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Senior Assassins — Target Map</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Share+Tech+Mono&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --grid: rgba(255,255,255,0.03);
+    --eliminated: #ff3b3b;
+    --eliminated-glow: rgba(255,59,59,0.4);
+    --active: #00e5ff;
+    --active-glow: rgba(0,229,255,0.35);
+    --unknown: #ffa500;
+    --unknown-glow: rgba(255,165,0,0.35);
+    --node-bg: #12121a;
+    --border: rgba(255,255,255,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    font-family: 'Share Tech Mono', monospace;
+    color: #fff;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  header {
+    text-align: center;
+    padding: 2rem 1rem 1rem;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+
+  header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(2.5rem, 8vw, 5rem);
+    letter-spacing: 0.12em;
+    background: linear-gradient(135deg, #ff3b3b 0%, #ff8c00 50%, #00e5ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 20px rgba(0,229,255,0.3));
+  }
+
+  header p {
+    color: rgba(255,255,255,0.4);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-top: 0.25rem;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    padding: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .legend-line {
+    width: 30px;
+    height: 3px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* SVG canvas */
+  #map-container {
+    position: relative;
+    width: 100%;
+    overflow: auto;
+  }
+
+  svg {
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* Node styles */
+  .node-group { cursor: default; }
+
+  .node-rect {
+    rx: 6;
+    ry: 6;
+    stroke-width: 1.5;
+    filter: url(#glow-active);
+  }
+
+  .node-rect.eliminated {
+    fill: rgba(255,59,59,0.12);
+    stroke: var(--eliminated);
+    filter: url(#glow-eliminated);
+  }
+
+  .node-rect.active {
+    fill: rgba(0,229,255,0.08);
+    stroke: var(--active);
+  }
+
+  .node-label {
+    fill: #fff;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    dominant-baseline: middle;
+    text-anchor: middle;
+  }
+
+  .node-sublabel {
+    fill: rgba(255,255,255,0.45);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    dominant-baseline: middle;
+    text-anchor: middle;
+    letter-spacing: 0.1em;
+  }
+
+  .node-rect.eliminated + text { fill: var(--eliminated); }
+
+  /* Arrow / edge styles */
+  .edge-eliminated {
+    stroke: var(--eliminated);
+    stroke-width: 2.5;
+    stroke-dasharray: none;
+    filter: url(#glow-edge-elim);
+    opacity: 0.9;
+  }
+
+  .edge-active {
+    stroke: var(--active);
+    stroke-width: 2;
+    stroke-dasharray: none;
+    opacity: 0.75;
+  }
+
+  .edge-unknown {
+    stroke: var(--unknown);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+    opacity: 0.7;
+  }
+
+  /* House labels */
+  .house-label {
+    fill: rgba(255,255,255,0.15);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+  }
+
+  .house-rect {
+    fill: rgba(255,255,255,0.02);
+    stroke: rgba(255,255,255,0.06);
+    stroke-width: 1;
+    rx: 10;
+    ry: 10;
+  }
+
+  /* Tooltip */
+  #tooltip {
+    position: fixed;
+    background: rgba(10,10,20,0.95);
+    border: 1px solid var(--active);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.7rem;
+    color: var(--active);
+    letter-spacing: 0.1em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 100;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Senior Assassins</h1>
+  <p>Target Network — Current State</p>
+</header>
+
+<div class="legend">
+  <div class="legend-item">
+    <div class="legend-dot" style="background:var(--eliminated);box-shadow:0 0 6px var(--eliminated)"></div>
+    Eliminated player
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:var(--active);box-shadow:0 0 6px var(--active)"></div>
+    Active player
+  </div>
+  <div class="legend-item">
+    <div class="legend-line" style="background:var(--eliminated)"></div>
+    Elimination confirmed
+  </div>
+  <div class="legend-item">
+    <div class="legend-line" style="background:var(--active)"></div>
+    Active target
+  </div>
+  <div class="legend-item">
+    <div class="legend-line" style="background:var(--unknown);background:repeating-linear-gradient(90deg,var(--unknown) 0,var(--unknown) 6px,transparent 6px,transparent 10px)"></div>
+    Unknown target (inherited)
+  </div>
+</div>
+
+<div id="map-container">
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+// ─── Data ───────────────────────────────────────────────────────────────────
+
+const players = {
+  Charlie: { house: 1, eliminated: true },
+  Amber:   { house: 1, eliminated: true },
+  Fariz:   { house: 2, eliminated: false },
+  Astley:  { house: 2, eliminated: false },
+  Kate:    { house: 2, eliminated: false },
+  Rachel:  { house: 2, eliminated: false },
+  SamT:    { house: 3, eliminated: false, label: 'Sam T' },
+  SamR:    { house: 4, eliminated: false, label: 'Sam R' },
+  Josh:    { house: 5, eliminated: false },
+  SamH:    { house: 5, eliminated: false, label: 'Sam H' },
+  Holly:   { house: 5, eliminated: false },
+  Ben:     { house: 6, eliminated: false },
+  Brad:    { house: 6, eliminated: false },
+  Jarrod:  { house: 7, eliminated: false },
+};
+
+const edges = [
+  // confirmed target edges (active, not eliminations)
+  { from: 'Rachel', to: 'SamT',  type: 'active' },
+  { from: 'SamT',   to: 'Fariz', type: 'active' },
+  { from: 'Fariz',  to: 'Holly', type: 'active' },
+  { from: 'Astley', to: 'Ben',   type: 'active' },
+  { from: 'Kate',   to: 'SamR',  type: 'active' },
+  { from: 'Josh',   to: 'Kate',  type: 'active' },
+  // eliminations
+  { from: 'Brad',   to: 'Charlie', type: 'eliminated' },
+  { from: 'Ben',    to: 'Amber',   type: 'eliminated' },
+  // inherited unknowns
+  { from: 'Brad',   to: null,      type: 'unknown', label: "Charlie's target" },
+  { from: 'Ben',    to: null,      type: 'unknown', label: "Amber's target" },
+];
+
+// ─── Layout: manual positions in a 1100×700 canvas ──────────────────────────
+
+const W = 1100, H = 720;
+const NODE_W = 100, NODE_H = 36;
+
+const pos = {
+  // House 1 (top-left)
+  Charlie: { x: 90,  y: 130 },
+  Amber:   { x: 90,  y: 200 },
+  // House 2 (top-center)
+  Rachel:  { x: 310, y: 90  },
+  Fariz:   { x: 450, y: 90  },
+  Astley:  { x: 310, y: 170 },
+  Kate:    { x: 450, y: 170 },
+  // House 3 (center-right)
+  SamT:    { x: 620, y: 90  },
+  // House 4 (right)
+  SamR:    { x: 790, y: 170 },
+  // House 5 (bottom-right)
+  Holly:   { x: 790, y: 440 },
+  Josh:    { x: 620, y: 360 },
+  SamH:    { x: 790, y: 360 },
+  // House 6 (bottom-left)
+  Ben:     { x: 220, y: 400 },
+  Brad:    { x: 90,  y: 340 },
+  // House 7 (far right)
+  Jarrod:  { x: 960, y: 260 },
+};
+
+// House grouping boxes
+const houses = [
+  { label: 'House 1', members: ['Charlie','Amber'], pad: 18 },
+  { label: 'House 2', members: ['Rachel','Fariz','Astley','Kate'], pad: 18 },
+  { label: 'House 3', members: ['SamT'], pad: 18 },
+  { label: 'House 4', members: ['SamR'], pad: 18 },
+  { label: 'House 5', members: ['Holly','Josh','SamH'], pad: 18 },
+  { label: 'House 6', members: ['Ben','Brad'], pad: 18 },
+  { label: 'House 7', members: ['Jarrod'], pad: 18 },
+];
+
+// ─── SVG helpers ─────────────────────────────────────────────────────────────
+
+const svg = document.getElementById('svg');
+svg.setAttribute('width', W);
+svg.setAttribute('height', H);
+svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+function el(tag, attrs = {}, parent = svg) {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  parent.appendChild(e);
+  return e;
+}
+
+// ─── Defs ────────────────────────────────────────────────────────────────────
+
+const defs = el('defs');
+
+function makeGlow(id, color, stdDev = 4) {
+  const f = el('filter', { id, x: '-50%', y: '-50%', width: '200%', height: '200%' }, defs);
+  el('feGaussianBlur', { stdDeviation: stdDev, result: 'blur' }, f);
+  el('feComposite', { in: 'SourceGraphic', in2: 'blur', operator: 'over' }, f);
+}
+makeGlow('glow-eliminated', '#ff3b3b', 5);
+makeGlow('glow-active', '#00e5ff', 4);
+makeGlow('glow-edge-elim', '#ff3b3b', 3);
+
+function makeArrow(id, color) {
+  const m = el('marker', { id, markerWidth: 8, markerHeight: 6, refX: 7, refY: 3, orient: 'auto' }, defs);
+  el('polygon', { points: '0 0, 8 3, 0 6', fill: color }, m);
+}
+makeArrow('arrow-eliminated', '#ff3b3b');
+makeArrow('arrow-active', '#00e5ff');
+makeArrow('arrow-unknown', '#ffa500');
+
+// Background grid
+el('rect', { width: W, height: H, fill: '#0a0a0f' });
+const patId = 'grid-pat';
+const pat = el('pattern', { id: patId, width: 40, height: 40, patternUnits: 'userSpaceOnUse' }, defs);
+el('path', { d: 'M 40 0 L 0 0 0 40', fill: 'none', stroke: 'rgba(255,255,255,0.03)', 'stroke-width': 1 }, pat);
+el('rect', { width: W, height: H, fill: `url(#${patId})` });
+
+// ─── House bounding boxes ─────────────────────────────────────────────────────
+
+for (const h of houses) {
+  const xs = h.members.map(m => pos[m].x);
+  const ys = h.members.map(m => pos[m].y);
+  const x1 = Math.min(...xs) - h.pad;
+  const y1 = Math.min(...ys) - h.pad - 16;
+  const x2 = Math.max(...xs) + NODE_W + h.pad;
+  const y2 = Math.max(...ys) + NODE_H + h.pad;
+  el('rect', { class: 'house-rect', x: x1, y: y1, width: x2 - x1, height: y2 - y1 });
+  el('text', { class: 'house-label', x: x1 + 8, y: y1 + 13 }).textContent = h.label.toUpperCase();
+}
+
+// ─── Edges ───────────────────────────────────────────────────────────────────
+
+function nodeCenter(key) {
+  const p = pos[key];
+  return { x: p.x + NODE_W / 2, y: p.y + NODE_H / 2 };
+}
+
+function edgeEndpoints(fromKey, toKey) {
+  const f = nodeCenter(fromKey);
+  const t = nodeCenter(toKey);
+  const dx = t.x - f.x, dy = t.y - f.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const ux = dx / len, uy = dy / len;
+  // offset from node edge
+  const ox = (NODE_W / 2 + 4) * ux;
+  const oy = (NODE_H / 2 + 4) * uy;
+  return {
+    x1: f.x + ox, y1: f.y + oy,
+    x2: t.x - ox * 1.5, y2: t.y - oy * 1.5,
+  };
+}
+
+// Unknown target ghost nodes
+const unknownTargets = {
+  Brad: { x: 90,  y: 470 },
+  Ben:  { x: 220, y: 530 },
+};
+
+for (const edge of edges) {
+  if (edge.type === 'unknown') {
+    const p = unknownTargets[edge.from];
+    const fc = nodeCenter(edge.from);
+    // dashed line to question box
+    el('line', {
+      x1: fc.x, y1: fc.y + NODE_H / 2 + 2,
+      x2: p.x + NODE_W / 2, y2: p.y,
+      class: 'edge-unknown',
+      'marker-end': 'url(#arrow-unknown)',
+    });
+    continue;
+  }
+  if (!edge.to) continue;
+  const ep = edgeEndpoints(edge.from, edge.to);
+  const cls = edge.type === 'eliminated' ? 'edge-eliminated' : 'edge-active';
+  const arrow = edge.type === 'eliminated' ? 'url(#arrow-eliminated)' : 'url(#arrow-active)';
+  el('line', { ...ep, class: cls, 'marker-end': arrow });
+}
+
+// ─── Nodes ───────────────────────────────────────────────────────────────────
+
+for (const [key, data] of Object.entries(players)) {
+  const p = pos[key];
+  const label = data.label || key;
+  const isElim = data.eliminated;
+  const g = el('g', { class: 'node-group' });
+
+  el('rect', {
+    x: p.x, y: p.y,
+    width: NODE_W, height: NODE_H,
+    class: `node-rect ${isElim ? 'eliminated' : 'active'}`,
+    rx: 6, ry: 6,
+    fill: isElim ? 'rgba(255,59,59,0.12)' : 'rgba(0,229,255,0.07)',
+    stroke: isElim ? '#ff3b3b' : '#00e5ff',
+    'stroke-width': 1.5,
+    filter: isElim ? 'url(#glow-eliminated)' : 'none',
+  }, g);
+
+  // Strike-through for eliminated
+  if (isElim) {
+    el('line', {
+      x1: p.x + 8, y1: p.y + NODE_H / 2,
+      x2: p.x + NODE_W - 8, y2: p.y + NODE_H / 2,
+      stroke: '#ff3b3b', 'stroke-width': 1.5, opacity: 0.5,
+    }, g);
+  }
+
+  el('text', {
+    class: 'node-label',
+    x: p.x + NODE_W / 2,
+    y: p.y + NODE_H / 2 - (isElim ? 4 : 0),
+    fill: isElim ? '#ff6b6b' : '#fff',
+    style: `font-family:'Share Tech Mono',monospace;font-size:13px;dominant-baseline:middle;text-anchor:middle;`,
+  }, g).textContent = label;
+
+  if (isElim) {
+    el('text', {
+      class: 'node-sublabel',
+      x: p.x + NODE_W / 2,
+      y: p.y + NODE_H / 2 + 10,
+      fill: '#ff4444',
+      style: `font-family:'Share Tech Mono',monospace;font-size:9px;dominant-baseline:middle;text-anchor:middle;letter-spacing:0.1em;`,
+    }, g).textContent = 'ELIMINATED';
+  }
+
+  // House badge
+  el('text', {
+    x: p.x + NODE_W - 4,
+    y: p.y + 4,
+    fill: 'rgba(255,255,255,0.25)',
+    style: 'font-family:Share Tech Mono,monospace;font-size:8px;text-anchor:end;dominant-baseline:hanging;',
+  }, g).textContent = `H${data.house}`;
+
+  svg.appendChild(g);
+}
+
+// ─── Unknown target ghost nodes ───────────────────────────────────────────────
+
+for (const [owner, p] of Object.entries(unknownTargets)) {
+  const g = el('g', { class: 'node-group' });
+
+  el('rect', {
+    x: p.x, y: p.y,
+    width: NODE_W, height: NODE_H,
+    fill: 'rgba(255,165,0,0.07)',
+    stroke: '#ffa500',
+    'stroke-width': 1.5,
+    'stroke-dasharray': '5 3',
+    rx: 6, ry: 6,
+  }, g);
+
+  el('text', {
+    x: p.x + NODE_W / 2,
+    y: p.y + NODE_H / 2 - 5,
+    fill: '#ffa500',
+    style: 'font-family:Share Tech Mono,monospace;font-size:13px;dominant-baseline:middle;text-anchor:middle;',
+  }, g).textContent = '???';
+
+  el('text', {
+    x: p.x + NODE_W / 2,
+    y: p.y + NODE_H / 2 + 8,
+    fill: 'rgba(255,165,0,0.6)',
+    style: 'font-family:Share Tech Mono,monospace;font-size:8px;dominant-baseline:middle;text-anchor:middle;letter-spacing:0.08em;',
+  }, g).textContent = `${owner.toUpperCase()}'S HEIR`;
+
+  svg.appendChild(g);
+}
+
+// ─── Jarrod: no known connections — orphan note ──────────────────────────────
+
+el('text', {
+  x: pos.Jarrod.x + NODE_W / 2,
+  y: pos.Jarrod.y + NODE_H + 14,
+  fill: 'rgba(255,255,255,0.25)',
+  style: 'font-family:Share Tech Mono,monospace;font-size:9px;text-anchor:middle;letter-spacing:0.08em;',
+}).textContent = 'no known links';
+
+el('text', {
+  x: pos.SamH.x + NODE_W / 2,
+  y: pos.SamH.y + NODE_H + 14,
+  fill: 'rgba(255,255,255,0.25)',
+  style: 'font-family:Share Tech Mono,monospace;font-size:9px;text-anchor:middle;letter-spacing:0.08em;',
+}).textContent = 'no known links';
+
+// ─── Chain labels ─────────────────────────────────────────────────────────────
+
+function edgeMid(fromKey, toKey, dy = -10) {
+  const f = nodeCenter(fromKey);
+  const t = nodeCenter(toKey);
+  return { x: (f.x + t.x) / 2, y: (f.y + t.y) / 2 + dy };
+}
+
+const chainLabels = [
+  { from: 'Brad', to: 'Charlie', text: 'ELIMINATED', color: '#ff3b3b' },
+  { from: 'Ben',  to: 'Amber',  text: 'ELIMINATED', color: '#ff3b3b' },
+];
+for (const lbl of chainLabels) {
+  const m = edgeMid(lbl.from, lbl.to, -10);
+  el('text', {
+    x: m.x, y: m.y,
+    fill: lbl.color,
+    style: 'font-family:Share Tech Mono,monospace;font-size:9px;text-anchor:middle;opacity:0.7;letter-spacing:0.1em;',
+  }).textContent = lbl.text;
+}
+
+// ─── Pulse animation on active nodes ─────────────────────────────────────────
+
+const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+style.textContent = `
+  @keyframes pulse {
+    0%,100% { opacity: 0.75; }
+    50% { opacity: 1; }
+  }
+  .edge-active { animation: pulse 2.5s ease-in-out infinite; }
+  .edge-eliminated { animation: none; }
+`;
+svg.insertBefore(style, svg.firstChild);
+</script>
+</body>
+</html>
