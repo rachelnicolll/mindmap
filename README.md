@@ -1,3 +1,1 @@
-# net-tracker
-# mindmap
 # mindmap
